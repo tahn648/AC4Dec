@@ -18,6 +18,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -103,6 +105,7 @@ fun DecoderAppScreen(
     val defaultBitDepth by viewModel.defaultBitDepth.collectAsState()
     val defaultSampleRate by viewModel.defaultSampleRate.collectAsState()
     val exportLocationLabel by viewModel.exportLocationLabel.collectAsState()
+    val isLoudnessReportEnabled by viewModel.isLoudnessReportEnabled.collectAsState()
     val meterLevels by viewModel.meterLevels.collectAsState()
     val lkfsValue by viewModel.lkfsValue.collectAsState()
     val truePeakValue by viewModel.truePeakValue.collectAsState()
@@ -124,6 +127,30 @@ fun DecoderAppScreen(
         if (uri != null) {
             viewModel.selectFile(uri)
         }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.getExportsDir()
+    }
+
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            val permissionsToRequest = mutableListOf<String>()
+            if (context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q) {
+                if (context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    permissionsToRequest.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
+            if (permissionsToRequest.isNotEmpty()) {
+                permissionLauncher.launch(permissionsToRequest.toTypedArray())
+            }
+        }
+        viewModel.getExportsDir()
     }
 
     Box(
@@ -379,9 +406,11 @@ fun DecoderAppScreen(
                 defaultBitDepth = defaultBitDepth,
                 defaultSampleRate = defaultSampleRate,
                 exportLocation = exportLocationLabel,
+                isLoudnessReportEnabled = isLoudnessReportEnabled,
                 onToggleWaveform = { viewModel.setWaveformMode(it) },
                 onSelectBitDepth = { viewModel.setDefaultBitDepth(it) },
                 onSelectSampleRate = { viewModel.setDefaultSampleRate(it) },
+                onToggleLoudnessReport = { viewModel.setLoudnessReportEnabled(it) },
                 onClearHistory = {
                     viewModel.clearHistory()
                     showSettingsDialog = false
@@ -1461,6 +1490,53 @@ fun SuccessCard(
                 }
             }
 
+            val reportFile = files.find { it.extension == "txt" }
+            if (reportFile != null && reportFile.exists()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = SurfaceBorder)
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Text(
+                    text = "LOUDNESS REPORT SPECIFICATIONS:",
+                    color = PurpleGlow,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    letterSpacing = 0.5.sp
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                var reportContent by remember { mutableStateOf("") }
+                LaunchedEffect(reportFile) {
+                    try {
+                        reportContent = reportFile.readText()
+                    } catch (e: Exception) {
+                        reportContent = "Failed to load loudness details specs: ${e.message}"
+                    }
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF090D16))
+                        .border(BorderStroke(1.dp, SurfaceBorder), RoundedCornerShape(8.dp))
+                        .padding(10.dp)
+                ) {
+                    val scrollState = rememberScrollState()
+                    Text(
+                        text = reportContent,
+                        color = CoolGrayText,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState)
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
@@ -1805,9 +1881,11 @@ fun SystemSettingsDialog(
     defaultBitDepth: Int,
     defaultSampleRate: Int,
     exportLocation: String,
+    isLoudnessReportEnabled: Boolean,
     onToggleWaveform: (Boolean) -> Unit,
     onSelectBitDepth: (Int) -> Unit,
     onSelectSampleRate: (Int) -> Unit,
+    onToggleLoudnessReport: (Boolean) -> Unit,
     onClearHistory: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1841,6 +1919,25 @@ fun SystemSettingsDialog(
                     Switch(
                         checked = waveformMode,
                         onCheckedChange = onToggleWaveform,
+                        colors = SwitchDefaults.colors(checkedThumbColor = CyberCyan, checkedTrackColor = CyberCyan.copy(alpha = 0.4f))
+                    )
+                }
+
+                HorizontalDivider(color = SurfaceBorder)
+
+                // Loudness Report toggle
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Generate Loudness Analysis Report", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Creates a professional BS.1770-4 LKFS audit checklist text file", color = CoolGrayText, fontSize = 9.sp)
+                    }
+                    Switch(
+                        checked = isLoudnessReportEnabled,
+                        onCheckedChange = onToggleLoudnessReport,
                         colors = SwitchDefaults.colors(checkedThumbColor = CyberCyan, checkedTrackColor = CyberCyan.copy(alpha = 0.4f))
                     )
                 }

@@ -25,6 +25,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import android.os.Environment
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -110,6 +113,9 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
     private val _exportLocationLabel = MutableStateFlow("Downloads/DolbyRefPlayer")
     val exportLocationLabel: StateFlow<String> = _exportLocationLabel.asStateFlow()
 
+    private val _isLoudnessReportEnabled = MutableStateFlow(false)
+    val isLoudnessReportEnabled: StateFlow<Boolean> = _isLoudnessReportEnabled.asStateFlow()
+
     // ------------------------------------------------------------
     // Active Metering & Audio Analysis
     // ------------------------------------------------------------
@@ -192,6 +198,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
         _waveformMode.value = prefs.getBoolean("waveform_mode", true)
         _defaultBitDepth.value = prefs.getInt("default_bit_depth", 16)
         _defaultSampleRate.value = prefs.getInt("default_sample_rate", 48000)
+        _isLoudnessReportEnabled.value = prefs.getBoolean("loudness_report_enabled", false)
         _exportLocationLabel.value = prefs.getString("export_folder", "Downloads/DolbyRefPlayer") ?: "Downloads/DolbyRefPlayer"
         val expModeName = prefs.getString("export_mode", ExportMode.StereoBinauralWav.name)
         _exportMode.value = try {
@@ -223,6 +230,11 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
     fun setExportMode(mode: ExportMode) {
         _exportMode.value = mode
         prefs.edit().putString("export_mode", mode.name).apply()
+    }
+
+    fun setLoudnessReportEnabled(enabled: Boolean) {
+        _isLoudnessReportEnabled.value = enabled
+        prefs.edit().putBoolean("loudness_report_enabled", enabled).apply()
     }
 
     fun setSimulationEnabled(enabled: Boolean) {
@@ -400,6 +412,41 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun getExportsDir(): File {
+        val context = getApplication<Application>()
+        val extState = Environment.getExternalStorageState()
+        if (Environment.MEDIA_MOUNTED == extState) {
+            val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Refract")
+            try {
+                if (!publicDir.exists()) {
+                    publicDir.mkdirs()
+                }
+                // Try writing a small dummy file to verify write access
+                val dummy = File(publicDir, ".write_test")
+                if (dummy.createNewFile()) {
+                    dummy.delete()
+                }
+                _exportLocationLabel.value = publicDir.absolutePath
+                return publicDir
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        
+        // Fallback to external files dir (publicly visible in Android/data/... but does not require any permission)
+        val extFilesDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        if (extFilesDir != null) {
+            val subdir = File(extFilesDir, "Refract").apply { mkdirs() }
+            _exportLocationLabel.value = subdir.absolutePath
+            return subdir
+        }
+        
+        // Fallback to internal private folder
+        val privateDir = File(context.filesDir, "exports").apply { mkdirs() }
+        _exportLocationLabel.value = privateDir.absolutePath
+        return privateDir
+    }
+
     fun startDecoding() {
         val state = _uiState.value
         if (state !is UIState.FileSelected) return
@@ -414,131 +461,142 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
 
                 val startTime = System.currentTimeMillis()
 
-                val activeMetadata = DolbyAc4Decoder.decode(
-                    context = context,
-                    inputUri = state.uri,
-                    outputPcmFile = cachePcmFile,
-                    isSimulationEnabled = _isSimulationEnabled.value,
-                    onProgress = { progress ->
-                        val currentState = _uiState.value
-                        if (currentState is UIState.Processing) {
-                            val elapsedSec = (System.currentTimeMillis() - startTime) / 1000f
-                            val estRemaining = if (progress > 0.05f) {
-                                ((elapsedSec / progress) - elapsedSec).toInt()
-                            } else {
-                                12
+                val activeMetadata = withContext(Dispatchers.IO) {
+                    DolbyAc4Decoder.decode(
+                        context = context,
+                        inputUri = state.uri,
+                        outputPcmFile = cachePcmFile,
+                        isSimulationEnabled = _isSimulationEnabled.value,
+                        onProgress = { progress ->
+                            val currentState = _uiState.value
+                            if (currentState is UIState.Processing) {
+                                val elapsedSec = (System.currentTimeMillis() - startTime) / 1000f
+                                val estRemaining = if (progress > 0.05f) {
+                                    ((elapsedSec / progress) - elapsedSec).toInt()
+                                } else {
+                                    12
+                                }
+                                _uiState.value = currentState.copy(
+                                    progress = progress,
+                                    status = "Decompressing spatial metadata channels (${String.format(Locale.getDefault(), "%.1f", progress * 100f)}%)...",
+                                    estSecondsRemaining = estRemaining.coerceIn(1, 120)
+                                )
                             }
-                            _uiState.value = currentState.copy(
-                                progress = progress,
-                                status = "Decompressing spatial metadata channels (${String.format(Locale.getDefault(), "%.1f", progress * 100f)}%)...",
-                                estSecondsRemaining = estRemaining.coerceIn(1, 120)
-                            )
+                        },
+                        onStatusUpdate = { status ->
+                            val currentState = _uiState.value
+                            if (currentState is UIState.Processing) {
+                                _uiState.value = currentState.copy(status = status)
+                            }
                         }
-                    },
-                    onStatusUpdate = { status ->
-                        val currentState = _uiState.value
-                        if (currentState is UIState.Processing) {
-                            _uiState.value = currentState.copy(status = status)
-                        }
-                    }
-                )
+                    )
+                }
 
-                val exportsDir = File(context.filesDir, "exports").apply { mkdirs() }
+                val exportsDir = getExportsDir()
                 val clearName = state.name.substringBeforeLast('.')
                 val finalFiles = mutableListOf<File>()
 
                 val activePres = _availablePresentations.value.getOrNull(_selectedPresentationIndex.value)
                 val presLabel = activePres?.label ?: "Standard"
 
-                when (_exportMode.value) {
-                    ExportMode.WaveMultichannel -> {
-                        val destFile = File(exportsDir, "${clearName}_multichannel.wav")
-                        cachePcmFile.copyTo(destFile, overwrite = true)
-                        finalFiles.add(destFile)
-                    }
-                    ExportMode.StereoBinauralWav -> {
-                        val destFile = File(exportsDir, "${clearName}_stereo_binaural.wav")
-                        WavHelper.downmixToStereWav(
-                            inputFile = cachePcmFile,
-                            outputFile = destFile,
-                            sourceChannelCount = activeMetadata.channelCount,
-                            sampleRate = _defaultSampleRate.value,
-                            bitsPerSample = _defaultBitDepth.value
-                        )
-                        finalFiles.add(destFile)
-                    }
-                    ExportMode.MonoWavCustomSplit -> {
-                        val splitWavs = WavHelper.splitMultichannelWav(
-                            inputFile = cachePcmFile,
-                            outputDir = exportsDir,
-                            baseName = clearName,
-                            channelCount = activeMetadata.channelCount,
-                            sampleRate = _defaultSampleRate.value,
-                            bitsPerSample = _defaultBitDepth.value
-                        )
-                        finalFiles.addAll(splitWavs)
-                    }
-                    ExportMode.MonoFlacCustomSplit -> {
-                        val tempSplitDir = File(context.cacheDir, "flac_splits").apply { mkdirs() }
-                        val splitWavs = WavHelper.splitMultichannelWav(
-                            inputFile = cachePcmFile,
-                            outputDir = tempSplitDir,
-                            baseName = clearName,
-                            channelCount = activeMetadata.channelCount,
-                            sampleRate = _defaultSampleRate.value,
-                            bitsPerSample = _defaultBitDepth.value
-                        )
-                        
-                        val flacFilesList = mutableListOf<File>()
-                        splitWavs.forEach { wav ->
-                            val flacFile = File(exportsDir, "${wav.nameWithoutExtension}.flac")
-                            val compressed = FlacEncoderHelper.encodeWavToFlac(
-                                wavFile = wav,
-                                flacFile = flacFile,
-                                channelCount = 1,
+                val reportFile = File(exportsDir, "${clearName}_Refract_Report.txt")
+
+                withContext(Dispatchers.IO) {
+                    when (_exportMode.value) {
+                        ExportMode.WaveMultichannel -> {
+                            val destFile = File(exportsDir, "${clearName}_multichannel.wav")
+                            cachePcmFile.copyTo(destFile, overwrite = true)
+                            finalFiles.add(destFile)
+                        }
+                        ExportMode.StereoBinauralWav -> {
+                            val destFile = File(exportsDir, "${clearName}_stereo_binaural.wav")
+                            WavHelper.downmixToStereWav(
+                                inputFile = cachePcmFile,
+                                outputFile = destFile,
+                                sourceChannelCount = activeMetadata.channelCount,
                                 sampleRate = _defaultSampleRate.value,
                                 bitsPerSample = _defaultBitDepth.value
                             )
-                            if (compressed) {
-                                flacFilesList.add(flacFile)
-                            } else {
-                                // Safe copy backup
-                                val fallbackFlac = File(exportsDir, "${wav.nameWithoutExtension}_split.wav")
-                                wav.copyTo(fallbackFlac, overwrite = true)
-                                flacFilesList.add(fallbackFlac)
-                            }
-                            wav.delete()
+                            finalFiles.add(destFile)
                         }
-                        
-                        // ZIP compressor integration
-                        val zippedContainer = File(exportsDir, "${clearName}_split_flacs.zip")
-                        ZipOutputStream(FileOutputStream(zippedContainer)).use { zos ->
-                            flacFilesList.forEach { flac ->
-                                val entry = ZipEntry(flac.name)
-                                zos.putNextEntry(entry)
-                                FileInputStream(flac).use { fis ->
-                                    val zipBuf = ByteArray(4096)
-                                    var readBytes: Int
-                                    while (fis.read(zipBuf).also { readBytes = it } != -1) {
-                                        zos.write(zipBuf, 0, readBytes)
-                                    }
+                        ExportMode.MonoWavCustomSplit -> {
+                            val splitWavs = WavHelper.splitMultichannelWav(
+                                inputFile = cachePcmFile,
+                                outputDir = exportsDir,
+                                baseName = clearName,
+                                channelCount = activeMetadata.channelCount,
+                                sampleRate = _defaultSampleRate.value,
+                                bitsPerSample = _defaultBitDepth.value
+                            )
+                            finalFiles.addAll(splitWavs)
+                        }
+                        ExportMode.MonoFlacCustomSplit -> {
+                            val tempSplitDir = File(context.cacheDir, "flac_splits").apply { mkdirs() }
+                            val splitWavs = WavHelper.splitMultichannelWav(
+                                inputFile = cachePcmFile,
+                                outputDir = tempSplitDir,
+                                baseName = clearName,
+                                channelCount = activeMetadata.channelCount,
+                                sampleRate = _defaultSampleRate.value,
+                                bitsPerSample = _defaultBitDepth.value
+                            )
+                            
+                            val flacFilesList = mutableListOf<File>()
+                            splitWavs.forEach { wav ->
+                                val flacFile = File(exportsDir, "${wav.nameWithoutExtension}.flac")
+                                val compressed = FlacEncoderHelper.encodeWavToFlac(
+                                    wavFile = wav,
+                                    flacFile = flacFile,
+                                    channelCount = 1,
+                                    sampleRate = _defaultSampleRate.value,
+                                    bitsPerSample = _defaultBitDepth.value
+                                )
+                                if (compressed) {
+                                    flacFilesList.add(flacFile)
+                                } else {
+                                    // Safe copy backup
+                                    val fallbackFlac = File(exportsDir, "${wav.nameWithoutExtension}_split.wav")
+                                    wav.copyTo(fallbackFlac, overwrite = true)
+                                    flacFilesList.add(fallbackFlac)
                                 }
-                                zos.closeEntry()
-                                flac.delete() // Cleanup zipped file to minimize storage footprint
+                                wav.delete()
                             }
+                            
+                            // ZIP compressor integration
+                            val zippedContainer = File(exportsDir, "${clearName}_split_flacs.zip")
+                            ZipOutputStream(FileOutputStream(zippedContainer)).use { zos ->
+                                flacFilesList.forEach { flac ->
+                                    val entry = ZipEntry(flac.name)
+                                    zos.putNextEntry(entry)
+                                    FileInputStream(flac).use { fis ->
+                                        val zipBuf = ByteArray(4096)
+                                        var readBytes: Int
+                                        while (fis.read(zipBuf).also { readBytes = it } != -1) {
+                                            zos.write(zipBuf, 0, readBytes)
+                                        }
+                                    }
+                                    zos.closeEntry()
+                                    flac.delete() // Cleanup zipped file to minimize storage footprint
+                                }
+                            }
+                            finalFiles.add(zippedContainer)
                         }
-                        finalFiles.add(zippedContainer)
                     }
+
+                    // Generates Refract report summary file logs
+                    if (_isLoudnessReportEnabled.value) {
+                        generateReport(reportFile, state.name, activeMetadata, presLabel, activeMetadata.channelCount)
+                        finalFiles.add(reportFile)
+                    }
+
+                    if (cachePcmFile.exists()) cachePcmFile.delete()
                 }
 
-                // Generates Refract report summary file logs
-                val reportFile = File(exportsDir, "${clearName}_Refract_Report.txt")
-                generateReport(reportFile, state.name, activeMetadata, presLabel, activeMetadata.channelCount)
-                finalFiles.add(reportFile)
-
-                if (cachePcmFile.exists()) cachePcmFile.delete()
-
-                _uiState.value = UIState.Success(activeMetadata, finalFiles, reportFile)
+                _uiState.value = UIState.Success(
+                    metadata = activeMetadata,
+                    exportedFiles = finalFiles,
+                    reportFile = if (_isLoudnessReportEnabled.value) reportFile else null
+                )
                 loadHistory()
 
             } catch (e: Exception) {

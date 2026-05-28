@@ -16,6 +16,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.Locale
 import kotlin.math.sin
 
 object DolbyAc4Decoder {
@@ -46,6 +47,26 @@ object DolbyAc4Decoder {
      * Inspects a file to retrieve its audio tracks and profile format. Supports AC-4, EC-3 (Atmos).
      */
     fun extractMetadata(context: Context, fileUri: Uri): DecodedMetadata {
+        // Query human-readable name from ContentResolver to get the real file extension!
+        var fileName = ""
+        try {
+            context.contentResolver.query(fileUri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (nameIndex != -1 && cursor.moveToFirst()) {
+                    fileName = cursor.getString(nameIndex) ?: ""
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        
+        if (fileName.isEmpty()) {
+            fileName = fileUri.lastPathSegment ?: ""
+        }
+        
+        val ext = fileName.substringAfterLast('.', "").lowercase(Locale.getDefault())
+        val lowerName = fileName.lowercase(Locale.getDefault())
+
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(context, fileUri, null)
@@ -60,7 +81,7 @@ object DolbyAc4Decoder {
                     val channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
                         format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                     } else {
-                        6
+                        if (mime.contains("eac3", ignoreCase = true)) 8 else 6
                     }
                     val sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
                         format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
@@ -109,10 +130,8 @@ object DolbyAc4Decoder {
             extractor.release()
         }
 
-        // Parse from file extension as safety fallback
-        val path = fileUri.path ?: ""
-        val ext = path.substringAfterLast('.', "").lowercase()
-        return if (ext == "ec3" || path.contains("ec3")) {
+        // Parse from resolved file name as high-fidelity safety fallback
+        return if (ext == "ec3" || ext == "eac3" || lowerName.contains("ec3") || lowerName.contains("eac3")) {
             DecodedMetadata(
                 mimeType = "audio/eac3",
                 channelCount = 8,
@@ -125,12 +144,15 @@ object DolbyAc4Decoder {
                 jocVersion = "JOC v2 (Atmos Master Spatial Objects)"
             )
         } else {
+            val isIms = ext == "ims" || lowerName.contains("ims") || lowerName.contains("binaural")
+            val channels = if (isIms) 2 else 6
+            val profile = if (isIms) "AC-4 IMS (Stereo Binaural)" else "AC-4 L4 (Multichannel Surround, 6ch) - [SIMULATION FALLBACK]"
             DecodedMetadata(
                 mimeType = "audio/ac4",
-                channelCount = 6,
+                channelCount = channels,
                 sampleRate = 48000,
                 durationUs = 12_000_000L,
-                profile = "AC-4 L4 (Multichannel Surround, 6ch) - [SIMULATION FALLBACK]",
+                profile = profile,
                 isSimulated = true,
                 bitRate = 192000,
                 bitDepth = 16,

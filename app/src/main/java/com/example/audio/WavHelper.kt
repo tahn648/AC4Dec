@@ -64,8 +64,8 @@ object WavHelper {
     }
 
     /**
-     * Splits multi-channel interleaved 16-bit PCM data into multiple mono PCM directories/files.
-     * Returns a list of split mono WAV files.
+     * Splits multi-channel interleaved 16-bit PCM data into multiple mono PCM files.
+     * Returns a list of split mono WAV files, encoded at the chosen bitsPerSample.
      */
     fun splitMultichannelWav(
         inputFile: File,
@@ -87,8 +87,9 @@ object WavHelper {
             else -> (1..channelCount).map { "Channel_$it" }
         }
 
-        val sampleSize = bitsPerSample / 8
-        val frameSize = channelCount * sampleSize
+        // Input cache file is always 16-bit PCM, i.e., 2 bytes per sample
+        val inputSampleSize = 2
+        val inputFrameSize = channelCount * inputSampleSize
         
         val files = channelNames.map { name ->
             File(outputDir, "${baseName}_$name.wav")
@@ -101,23 +102,31 @@ object WavHelper {
             fos
         }
 
+        val outputSampleSize = bitsPerSample / 8
+
         try {
             inputFile.inputStream().buffered().use { fis ->
                 // Skip the header of the input file (assuming it has a 44-byte WAV header)
-                val skipped = fis.skip(44)
+                fis.skip(44)
                 
-                val buffer = ByteArray(frameSize * 1024)
+                val buffer = ByteArray(inputFrameSize * 1024)
                 var bytesRead: Int
                 val dataSizes = LongArray(channelCount) { 0L }
 
                 while (fis.read(buffer).also { bytesRead = it } != -1) {
-                    val framesRead = bytesRead / frameSize
+                    val framesRead = bytesRead / inputFrameSize
                     for (f in 0 until framesRead) {
-                        val frameOffset = f * frameSize
+                        val frameOffset = f * inputFrameSize
                         for (c in 0 until channelCount) {
-                            val sampleOffset = frameOffset + (c * sampleSize)
-                            fileStreams[c].write(buffer, sampleOffset, sampleSize)
-                            dataSizes[c] += sampleSize
+                            val sampleOffset = frameOffset + (c * inputSampleSize)
+                            if (sampleOffset + 1 < bytesRead) {
+                                val low = buffer[sampleOffset].toInt() and 0xFF
+                                val high = buffer[sampleOffset + 1].toInt()
+                                val sample16 = ((high shl 8) or low).toShort()
+                                
+                                writeSample(fileStreams[c], sample16, bitsPerSample)
+                                dataSizes[c] += outputSampleSize
+                            }
                         }
                     }
                 }
@@ -138,7 +147,38 @@ object WavHelper {
     }
 
     /**
-     * Downmixes a 5.1/7.1 or multi-channel WAV file into Stereo/Binaural Wav file.
+     * Helper to write a 16-bit PCM short sample scaled to desired target bits per sample
+     */
+    private fun writeSample(os: java.io.OutputStream, sample: Short, bitsPerSample: Int) {
+        when (bitsPerSample) {
+            16 -> {
+                os.write(sample.toInt() and 0xFF)
+                os.write((sample.toInt() shr 8) and 0xFF)
+            }
+            24 -> {
+                // Scale 16-bit to 24-bit PCM (shift left by 8 bits)
+                val val24 = sample.toInt() shl 8
+                os.write(val24 and 0xFF)
+                os.write((val24 shr 8) and 0xFF)
+                os.write((val24 shr 16) and 0xFF)
+            }
+            32 -> {
+                // Scale 16-bit to 32-bit PCM (shift left by 16 bits)
+                val val32 = sample.toInt() shl 16
+                os.write(val32 and 0xFF)
+                os.write((val32 shr 8) and 0xFF)
+                os.write((val32 shr 16) and 0xFF)
+                os.write((val32 shr 24) and 0xFF)
+            }
+            else -> {
+                os.write(sample.toInt() and 0xFF)
+                os.write((sample.toInt() shr 8) and 0xFF)
+            }
+        }
+    }
+
+    /**
+     * Downmixes a 5.1/7.1 or multi-channel WAV file into Stereo/Binaural WAV file.
      */
     fun downmixToStereWav(
         inputFile: File,
@@ -147,25 +187,27 @@ object WavHelper {
         sampleRate: Int,
         bitsPerSample: Int
     ): File {
-        val sampleSize = bitsPerSample / 8
-        val frameSize = sourceChannelCount * sampleSize
+        // Input cache file is always 16-bit PCM (sample size = 2 bytes)
+        val inputSampleSize = 2
+        val inputFrameSize = sourceChannelCount * inputSampleSize
         
         val fos = FileOutputStream(outputFile)
         writeWavHeader(2, sampleRate, bitsPerSample, 0, fos)
         
         var outputDataSize = 0L
+        val outputSampleSize = bitsPerSample / 8
 
         try {
             inputFile.inputStream().buffered().use { fis ->
                 fis.skip(44) // Skip WAV header
                 
-                val frameBuffer = ByteArray(frameSize)
+                val frameBuffer = ByteArray(inputFrameSize)
                 
-                while (fis.read(frameBuffer) == frameSize) {
+                while (fis.read(frameBuffer) == inputFrameSize) {
                     // Read 16-bit PCM values
                     val channels = ShortArray(sourceChannelCount)
                     for (c in 0 until sourceChannelCount) {
-                        val offset = c * 2
+                        val offset = c * inputSampleSize
                         val low = frameBuffer[offset].toInt() and 0xFF
                         val high = frameBuffer[offset + 1].toInt()
                         channels[c] = ((high shl 8) or low).toShort()
@@ -199,14 +241,9 @@ object WavHelper {
                     }
 
                     // Write Stereo frame
-                    val outFrame = ByteArray(4)
-                    outFrame[0] = (l.toInt() and 0xFF).toByte()
-                    outFrame[1] = ((l.toInt() shr 8) and 0xFF).toByte()
-                    outFrame[2] = (r.toInt() and 0xFF).toByte()
-                    outFrame[3] = ((r.toInt() shr 8) and 0xFF).toByte()
-
-                    fos.write(outFrame)
-                    outputDataSize += 4
+                    writeSample(fos, l, bitsPerSample)
+                    writeSample(fos, r, bitsPerSample)
+                    outputDataSize += (outputSampleSize * 2)
                 }
             }
         } finally {
