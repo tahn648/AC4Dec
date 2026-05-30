@@ -518,8 +518,8 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                 if (metadata.mimeType.contains("ac4", ignoreCase = true)) {
                     _availablePresentations.value = listOf(
                         DolbyAc4Decoder.PresentationInfo("pr_1", "Main Immersive Mix (English)", "eng", true, "5.1.4 Object Bed", -16.0),
-                        DolbyAc4Decoder.PresentationInfo("pr_2", "Dialogue Enhanced Auditory Assist", "eng", false, "Stereo (Clear Voice Boost)", -12.4),
-                        DolbyAc4Decoder.PresentationInfo("pr_3", "Visual Disability audio narrative", "spa", false, "Stereo Downmix", -14.0)
+                        DolbyAc4Decoder.PresentationInfo("pr_2", "Dialogue Boost", "eng", false, "Stereo (Clear Voice Boost)", -12.4),
+                        DolbyAc4Decoder.PresentationInfo("pr_3", "Hearing Aid", "spa", false, "Stereo Downmix", -14.0)
                     )
                 } else {
                     _availablePresentations.value = listOf(

@@ -263,7 +263,7 @@ fun DecoderAppScreen(
                             letterSpacing = 2.sp
                         )
                         Text(
-                            text = "Professional Dolby Atmos & AC-4 Studio",
+                            text = "Mobile Dolby Atmos Decoder",
                             fontSize = 10.sp,
                             color = CoolGrayText,
                             fontWeight = FontWeight.Bold,
@@ -796,7 +796,7 @@ fun CapabilitiesHardwareCard(
                 }
                 val isEac3Hw = hasEac3 && !eac3DecoderName.contains("google", ignoreCase = true)
                 AnimatedCodecRow(
-                    title = "E-AC3-JOC (Dolby Atmos Objects)",
+                    title = "E-AC3-JOC (Dolby Digital Plus Atmos)",
                     statusText = if (hasEac3) (if (isEac3Hw) "✅ Hardware ($eac3DecoderName)" else "✅ Software Fallback ($eac3DecoderName)") else "⚠️ Emulated (no hardware decoder)",
                     statusColor = if (hasEac3) (if (isEac3Hw) AcidGreen else CyberCyan) else PurpleGlow,
                     isReducedMotion = isReducedMotion,
@@ -844,7 +844,7 @@ fun CapabilitiesHardwareCard(
                 horizontalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = if (showDiagnostics) "Hide Codec Registry" else "Show Full Android MediaCodec Registry",
+                    text = if (showDiagnostics) "Hide Codec Registry" else "Show Codec Registry",
                     color = CyberCyan,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
@@ -1272,7 +1272,7 @@ fun FileSelectedCard(
 
             // Speaker Channel config mappings with coordinate matrix drawing preview
             Text(
-                text = "SURROUND / IMMERSIVE OUT-STAGE LAYOUT",
+                text = "OUTPUT LAYOUT",
                 fontWeight = FontWeight.Bold,
                 color = CyberCyan,
                 fontSize = 11.sp,
@@ -1527,17 +1527,7 @@ fun ExportModeOptionTile(
     tooltip: String? = null,
     onClick: () -> Unit
 ) {
-    androidx.compose.material3.TooltipBox(
-        positionProvider = androidx.compose.material3.TooltipDefaults.rememberPlainTooltipPositionProvider(),
-        tooltip = {
-            if (!enabled && tooltip != null) {
-                androidx.compose.material3.PlainTooltip {
-                    Text(tooltip)
-                }
-            }
-        },
-        state = androidx.compose.material3.rememberTooltipState()
-    ) {
+    Box(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1890,7 +1880,7 @@ fun SuccessCard(
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Text(
-                    text = "DECODE OTHER IMMERSIVE BITSTREAM",
+                    text = "DECODE ANOTHER FILE",
                     color = IceWhite,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp
@@ -2249,25 +2239,6 @@ fun SystemSettingsDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                // Waveform toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Waveform Display", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("Show audio waveform with pinch-to-zoom and tap-to-seek", color = CoolGrayText, fontSize = 9.sp)
-                    }
-                    Switch(
-                        checked = waveformMode,
-                        onCheckedChange = onToggleWaveform,
-                        colors = SwitchDefaults.colors(checkedThumbColor = CyberCyan, checkedTrackColor = CyberCyan.copy(alpha = 0.4f))
-                    )
-                }
-
-                HorizontalDivider(color = SurfaceBorder)
-
                 // Loudness Report toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2353,18 +2324,6 @@ fun SystemSettingsDialog(
 
                 HorizontalDivider(color = SurfaceBorder)
 
-                // Graphics API
-                Column {
-                    val am = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                    val glVersion = am.deviceConfigurationInfo.glEsVersion
-                    
-                    Text("Graphics API", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(if (vulkanAvailable) "Vulkan Enabled" else "OpenGL ES (version $glVersion fallback)", color = AcidGreen, fontSize = 11.sp)
-                }
-
-                HorizontalDivider(color = SurfaceBorder)
-
                 // Pure database and metadata wipe
                 Button(
                     onClick = onClearHistory,
@@ -2412,7 +2371,7 @@ fun HardwareInfoDialog(
                     lineHeight = 15.sp
                 )
                 Text(
-                    "• E-AC3-JOC (Dolby Atmos):\n" +
+                    "• E-AC3-JOC (Dolby Digital Plus Atmos):\n" +
                     "E-AC3 with JOC (Joint Object Coding) delivers immersive spatial audio. Devices with hardware support can decode full spatial mixes, while software decoders will fallback to standard 5.1 multichannel audio.",
                     color = IceWhite,
                     fontSize = 11.sp,

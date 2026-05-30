@@ -119,7 +119,7 @@ fun PageWelcome(onNext: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = "Professional Dolby Atmos & AC-4 Studio",
+            text = "Mobile Dolby Atmos Decoder",
             color = CyberCyan,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
@@ -165,7 +165,7 @@ fun PageCodecs(supportInfo: DecoderSupportInfo?, onNext: () -> Unit) {
         Spacer(modifier = Modifier.height(32.dp))
         
         CodecRow(
-            title = "E-AC3-JOC (Dolby Atmos Objects)",
+            title = "E-AC3-JOC (Dolby Digital Plus Atmos)",
             status = if (hasEac3) {
                 if (isEac3Hw) "✅ Hardware decoder found" else "⚡ Software fallback"
             } else "❌ Unavailable",

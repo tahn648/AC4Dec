@@ -17,6 +17,10 @@ android {
     versionCode = 1
     versionName = "1.0"
 
+    ndk {
+      abiFilters += listOf("arm64-v8a")
+    }
+
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
@@ -68,7 +72,7 @@ secrets {
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
-  implementation("com.arthenica:ffmpeg-kit-android-audio:6.0-2")
+  implementation("com.github.arthenica:ffmpeg-kit:v6.0")
   implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
   implementation("androidx.media3:media3-exoplayer:1.5.1")
   implementation("androidx.media3:media3-extractor:1.5.1")

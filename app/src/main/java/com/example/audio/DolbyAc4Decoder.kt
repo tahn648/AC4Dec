@@ -142,7 +142,7 @@ object DolbyAc4Decoder {
                 
                 val profile = when {
                     mime.contains("eac3", ignoreCase = true) -> {
-                        "E-AC3-JOC (Dolby Digital Plus & Atmos Objects)"
+                        "E-AC3-JOC (Dolby Digital Plus Atmos)"
                     }
                     channels == 2 -> {
                         "AC-4 IMS (Immersive Stereo / Binaural)"
@@ -177,7 +177,7 @@ object DolbyAc4Decoder {
                 channelCount = 8,
                 sampleRate = 48000,
                 durationUs = 15_000_000L,
-                profile = "E-AC3-JOC (Dolby Digital Plus & Atmos Objects)",
+                profile = "E-AC3-JOC (Dolby Digital Plus Atmos)",
                 bitRate = 448000,
                 bitDepth = 24,
                 presentationsCount = 1,
@@ -565,6 +565,8 @@ object DolbyAc4Decoder {
             try { codec?.stop(); codec?.release() } catch (e: Exception) {}
             try { bos?.close() } catch (e: Exception) {}
         }
+    }
+
     /**
      * Decodes an EAC3/DD+JOC file using FFmpegKit (software, no license needed).
      * Use this when hardware MediaCodec EAC3 decoder is unavailable.
@@ -642,7 +644,7 @@ object DolbyAc4Decoder {
                 channelCount = channels,
                 sampleRate = sampleRate,
                 durationUs = durationUs,
-                profile = "E-AC3-JOC DD+ Software Decode (${channels}ch)",
+                profile = "E-AC3-JOC (Dolby Digital Plus Atmos) Software Decode (${channels}ch)",
                 bitDepth = targetBitsPerSample,
                 bitRate = bitRate,
                 isSimulated = false,

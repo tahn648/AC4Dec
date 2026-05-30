@@ -20,8 +20,8 @@ dependencyResolutionManagement {
     google()
     maven { url = uri("https://jitpack.io") }
     mavenCentral()
-    maven { url = uri("https://github.com/arthenica/ffmpeg-kit/releases/download/v6.0/") }
-    maven { url = uri("https://raw.githubusercontent.com/arthenica/ffmpeg-kit-android-binary/main/releases/") }
+    maven { url = uri("https://s01.oss.sonatype.org/content/repositories/releases/") }
+    maven { url = uri("https://oss.sonatype.org/content/repositories/releases/") }
   }
 }
 
